@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/event_model.dart';
 import '../theme/yanegi_theme.dart';
 import '../widgets/app_avatars.dart';
+import '../widgets/action_gate.dart';
 import '../services/activity_notification_service.dart';
 import '../services/event_service.dart';
 import '../services/saved_events_service.dart';
@@ -509,6 +510,10 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
   Future<void> _handleJoinRequest() async {
     debugPrint('JOIN BUTTON TAP');
     if (_isRequesting) return;
+    if (!await ActionGate.ensureCanAct(context,
+        message: 'Complete your profile to join events.')) {
+      return;
+    }
 
     if (mounted) {
       setState(() {
@@ -628,6 +633,10 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
 
   Future<void> _handleJoinWaitlist() async {
     if (_isWaitlisting) return;
+    if (!await ActionGate.ensureCanAct(context,
+        message: 'Complete your profile to join events.')) {
+      return;
+    }
     if (mounted) setState(() => _isWaitlisting = true);
     try {
       await _eventService.joinWaitlist(eventId: widget.eventId);

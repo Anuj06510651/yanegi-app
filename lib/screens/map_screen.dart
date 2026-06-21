@@ -42,6 +42,7 @@ import '../services/media_storage_service.dart';
 import '../services/app_theme_service.dart';
 import '../utils/event_avatar_utils.dart';
 import '../widgets/friends_going_strip.dart';
+import '../widgets/action_gate.dart';
 import '../widgets/share_to_chat_sheet.dart';
 import '../widgets/first_launch_tutorial.dart';
 import '../widgets/app_rating_dialog.dart';

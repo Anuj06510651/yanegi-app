@@ -216,6 +216,10 @@ extension _MapEventsController on _MapScreenState {
   }
 
   Future<void> _handleOrbTap() async {
+    if (!await ActionGate.ensureCanAct(context,
+        message: 'Complete your profile to create an event.')) {
+      return;
+    }
     final initialLocation = _currentUserLocation ??
         await _ensureUserLocation(moveMap: false, showErrors: false);
 

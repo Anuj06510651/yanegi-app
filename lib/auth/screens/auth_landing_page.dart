@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:yanegi/auth/screens/email_input_page.dart';
 import 'package:yanegi/onboarding/auth_bootstrapper.dart';
@@ -31,9 +32,21 @@ class _AuthLandingPageState extends State<AuthLandingPage> {
         return;
       }
 
+      debugPrint('AUTH FLOW STEP 10: rebootstrapping after Google sign-in');
       AuthBootstrapperController.rebootstrap(navigationContext: context);
     } catch (e) {
       if (!mounted) return;
+      // Safety net: even if Firestore setup threw, Firebase Auth may have
+      // succeeded. If the current user is real (non-anonymous), rebootstrap
+      // instead of showing an error — bootstrap will handle profile creation.
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null && !currentUser.isAnonymous) {
+        debugPrint(
+          'AUTH FLOW STEP 10: Firestore error but auth succeeded — rebooting anyway',
+        );
+        AuthBootstrapperController.rebootstrap(navigationContext: context);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_authFlowService.toFriendlyError(e))),
       );

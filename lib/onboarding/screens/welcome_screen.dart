@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:yanegi/auth/screens/auth_landing_page.dart';
@@ -20,7 +21,6 @@ class WelcomeScreen extends StatefulWidget {
 
 class _WelcomeScreenState extends State<WelcomeScreen> {
   final AuthFlowService _authFlowService = AuthFlowService();
-  final AuthService _authService = AuthService();
   bool _isGoogleSigningIn = false;
   bool _isContinuingAsGuest = false;
 
@@ -106,20 +106,45 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   Future<void> _continueAsGuest() async {
     if (_isContinuingAsGuest) return;
     setState(() => _isContinuingAsGuest = true);
+
+    bool anonSucceeded = false;
     try {
-    } catch (_) {
-      // Anonymous provider disabled or auth failed — navigate to map anyway.
-      // The map handles unauthenticated state gracefully.
+      debugPrint('AUTH FLOW STEP 1: guest — attempting anonymous sign-in');
+      await FirebaseAuth.instance.signInAnonymously();
+      anonSucceeded = true;
+      debugPrint('AUTH FLOW STEP 2: anonymous sign-in succeeded');
+    } catch (e) {
+      debugPrint('AUTH FLOW STEP 2: anonymous sign-in failed ($e) — null-user guest path');
     }
+
     if (!mounted) {
       _isContinuingAsGuest = false;
       return;
     }
     setState(() => _isContinuingAsGuest = false);
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const MapPage()),
-      (route) => false,
-    );
+
+    if (anonSucceeded) {
+      // Bootstrap sees the anonymous user and routes to map.
+      // resetNavigation:false keeps AuthBootstrapper alive for later rebootstrap().
+      debugPrint('AUTH FLOW STEP 3: rebooting to map as anonymous guest');
+      final rebooted = AuthBootstrapperController.rebootstrap(
+        navigationContext: context,
+        resetNavigation: false,
+      );
+      if (!rebooted && mounted) {
+        Navigator.of(context, rootNavigator: true).push(
+          MaterialPageRoute(builder: (_) => const MapPage()),
+        );
+      }
+    } else {
+      // Anonymous provider is disabled in Firebase. Use push (NOT pushAndRemoveUntil)
+      // so the AuthBootstrapper route stays as route #1 — this allows rebootstrap()
+      // to work when the user later signs in with Google or email from the profile tab.
+      debugPrint('AUTH FLOW STEP 3: pushing map as null-user guest (anon disabled)');
+      Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(builder: (_) => const MapPage()),
+      );
+    }
   }
 
   Future<void> _signInWithGoogle() async {

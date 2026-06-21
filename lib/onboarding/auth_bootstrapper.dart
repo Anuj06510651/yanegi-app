@@ -165,7 +165,20 @@ class _AuthBootstrapperState extends State<AuthBootstrapper> {
     debugPrint('AUTH BOOTSTRAP: restored uid = ${user?.uid}');
 
     if (user == null) {
+      debugPrint('AUTH FLOW STEP 4: no auth user — routing to welcome');
       return const _BootstrapDecision(_BootstrapDestination.welcome);
+    }
+
+    debugPrint('AUTH FLOW STEP 5: auth user resolved — uid=\${user.uid} isAnonymous=\${user.isAnonymous}');
+
+    // Anonymous users are guests who tapped "Skip". They can browse the map but
+    // have not completed onboarding. Route them straight to MapPage and let the
+    // profile / action screens handle the auth-upgrade flow when they need it.
+    // Do NOT send anonymous users through onboarding — that was the old behavior
+    // that made the app create a doc and route to name/username setup for guests.
+    if (user.isAnonymous) {
+      debugPrint('AUTH FLOW STEP 6: anonymous guest — routing to map (no onboarding)');
+      return const _BootstrapDecision(_BootstrapDestination.map);
     }
 
     // Fast-path: local Hive cache already knows the user completed onboarding.
@@ -173,12 +186,12 @@ class _AuthBootstrapperState extends State<AuthBootstrapper> {
     // cache stays current for the next launch.
     final cachedHasCompleted = LocalProfileCache.loadHasCompleted(user.uid);
     if (cachedHasCompleted == true) {
-      debugPrint('AUTH BOOTSTRAP: cache hit — routing to map instantly');
+      debugPrint('AUTH FLOW STEP 7: cache hit — routing to map instantly');
       _refreshUserDocInBackground(user.uid);
       return const _BootstrapDecision(_BootstrapDestination.map);
     }
 
-    debugPrint('AUTH BOOTSTRAP: cache miss — fetching from server');
+    debugPrint('AUTH FLOW STEP 7: cache miss — fetching server doc');
     final userDoc = await _fetchUserDocument(user.uid);
     final userData = userDoc.data();
 
@@ -202,7 +215,7 @@ class _AuthBootstrapperState extends State<AuthBootstrapper> {
 
     final hasCompletedProfile = userData?['hasCompletedProfile'] == true;
     debugPrint(
-      'AUTH BOOTSTRAP: hasCompletedProfile = $hasCompletedProfile',
+      'AUTH FLOW STEP 8: hasCompletedProfile = \$hasCompletedProfile',
     );
 
     // Persist the freshly-fetched profile to the local cache so the next cold
@@ -214,10 +227,12 @@ class _AuthBootstrapperState extends State<AuthBootstrapper> {
     );
 
     if (hasCompletedProfile) {
+      debugPrint('AUTH FLOW STEP 9: profile complete — routing to map');
       return const _BootstrapDecision(_BootstrapDestination.map);
     }
 
     final step = _inferOnboardingStep(userData);
+    debugPrint('AUTH FLOW STEP 9: profile incomplete — routing to onboarding step=\$step');
     return _BootstrapDecision(
       _BootstrapDestination.onboarding,
       onboardingStep: step,

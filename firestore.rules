@@ -391,7 +391,8 @@ service cloud.firestore {
             'updatedAt', 'updated_at',
             'createdAt', 'created_at',
             'friends',
-            'lastEventCreatedAt'
+            'lastEventCreatedAt',
+            'galleryPhotos', 'prompts'
           ])
           && (!('userId' in request.resource.data) || request.resource.data.userId == userId)
           && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
@@ -414,7 +415,8 @@ service cloud.firestore {
             'updatedAt', 'updated_at',
             'authProvider',
             'friends',
-            'lastEventCreatedAt'
+            'lastEventCreatedAt',
+            'galleryPhotos', 'prompts'
           ])
           && (!('userId' in request.resource.data) || request.resource.data.userId == userId)
           && (!('uid' in request.resource.data) || request.resource.data.uid == userId);

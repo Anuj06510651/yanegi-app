@@ -30,6 +30,7 @@ import '../utils/media_url_resolver.dart';
 import '../widgets/app_avatars.dart';
 import '../widgets/app_image_viewer.dart';
 import '../widgets/guest_gate.dart';
+import '../widgets/action_gate.dart';
 import '../widgets/share_to_chat_sheet.dart';
 import 'blocked_users_screen.dart';
 import 'chat/chat_thread_screen.dart';
@@ -91,6 +92,7 @@ class _SocialProfileScreenState extends State<SocialProfileScreen> {
   UploadQueueState? _profileUploadState;
   UploadQueueState? _bannerUploadState;
   StreamSubscription<UploadStatusEvent>? _uploadStatusSub;
+  StreamSubscription<User?>? _authSub;
 
   String _displayName = '';
   String _username = '';
@@ -142,8 +144,8 @@ class _SocialProfileScreenState extends State<SocialProfileScreen> {
   List<String> _galleryPhotos = const <String>[];
   // Prompt cards, stored at users/{uid}.prompts as [{question, answer}].
   List<Map<String, String>> _prompts = const <Map<String, String>>[];
-  // Per-slot upload-in-flight guard so taps don't double-fire.
-  bool _isUploadingGalleryPhoto = false;
+  // Per-slot upload-in-flight tracking — only the uploading slot shows a spinner.
+  final Set<int> _uploadingGallerySlots = {};
 
   static const int _hostedEventsPageSize = 8;
 
@@ -192,6 +194,32 @@ class _SocialProfileScreenState extends State<SocialProfileScreen> {
     // loading empty profile data.
     if (_isOwnProfile && GuestGate.isGuest) {
       _isGuestOwnProfile = true;
+      // Safety net: if rebootstrap() didn't fire (e.g. AuthBootstrapper was
+      // destroyed by pushAndRemoveUntil), watch for auth state changes and
+      // reinitialise the screen the moment the user becomes non-anonymous.
+      _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
+        if (!mounted) return;
+        if (user != null && !user.isAnonymous && _isGuestOwnProfile) {
+          debugPrint('AUTH FLOW STEP 11: auth upgrade detected in profile screen — reinitialising');
+          setState(() => _isGuestOwnProfile = false);
+          _authSub?.cancel();
+          _authSub = null;
+          // Re-run the full initState logic for the now-authenticated user.
+          _scrollController.addListener(_onScroll);
+          _initFriendStateStream();
+          _syncUploadStatesFromQueue();
+          _uploadStatusSub?.cancel();
+          _uploadStatusSub = _mediaStorageService.uploadStatusStream.listen(
+            _onUploadStatusEvent,
+          );
+          _loadInitialHostedEvents();
+          _loadJoinedEventsIfNeeded();
+          unawaited(_loadMutualFriends());
+          unawaited(_loadFriendsPreview());
+          unawaited(_loadInterestTags());
+          unawaited(_loadSharedEventsCount());
+        }
+      });
       return;
     }
     _scrollController.addListener(_onScroll);
@@ -212,6 +240,7 @@ class _SocialProfileScreenState extends State<SocialProfileScreen> {
 
   @override
   void dispose() {
+    _authSub?.cancel();
     _uploadStatusSub?.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -254,9 +283,11 @@ class _SocialProfileScreenState extends State<SocialProfileScreen> {
               return _buildProfileErrorState();
             }
 
+            debugPrint('PUBLIC PROFILE FETCH START: profileUid=$_profileUid isOwn=$_isOwnProfile conn=${snapshot.connectionState}');
             final profileMap =
                 snapshot.data?.data() ?? const <String, dynamic>{};
             _syncProfileFromSnapshot(profileMap);
+            debugPrint('PUBLIC PROFILE FETCH SUCCESS: gallery=${_galleryPhotos.length} prompts=${_prompts.length} name=$_displayName');
 
             final profileBody = SingleChildScrollView(
               controller: _scrollController,

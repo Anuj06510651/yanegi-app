@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
@@ -95,17 +97,22 @@ class AuthFlowService {
   }
 
   Future<GoogleSignInFlowResult?> _continueWithGoogleInternal() async {
+    debugPrint('AUTH FLOW STEP 7: Google sign-in starting');
     final credential = await _authService.signInWithGoogle();
     final user = credential?.user ?? _auth.currentUser;
+    debugPrint('AUTH FLOW STEP 8: Firebase Auth result — uid=${user?.uid}');
     if (user == null) return null;
 
-    // ignore: avoid_print
-    print('User: ${_auth.currentUser}');
+    final uid = user.uid;
+    final email = _normalizeEmail(user.email);
+    bool hasExistingProfile = false;
 
+    // Firestore setup is best-effort. If it fails, Firebase Auth has already
+    // succeeded — bootstrap will create the user doc on the next rebootstrap().
+    // Never throw here after a successful Auth sign-in; doing so prevents
+    // rebootstrap() from being called and leaves the user stuck.
     try {
-      final uid = user.uid;
-      final email = _normalizeEmail(user.email);
-
+      debugPrint('AUTH FLOW STEP 9: setting up Firestore profile uid=$uid');
       await _userService.createOrGetUser(
         uid: uid,
         email: email,
@@ -114,8 +121,8 @@ class AuthFlowService {
 
       final userDoc = await _users.doc(uid).get();
       final data = userDoc.data();
-      final hasExistingProfile =
-          userDoc.exists && data?['hasCompletedProfile'] == true;
+      hasExistingProfile = userDoc.exists && data?['hasCompletedProfile'] == true;
+      debugPrint('AUTH FLOW STEP 9: hasExistingProfile=$hasExistingProfile');
 
       // Identity isolation: never seed the user doc from the Google profile.
       // The avatar/banner MUST come from Yanegi storage uploads done in
@@ -132,15 +139,19 @@ class AuthFlowService {
       await _users.doc(uid).set(payload, SetOptions(merge: true));
       await _userService.syncAuthContactFields();
       await _userService.refreshCurrentUserProfile();
-
-      return GoogleSignInFlowResult(
-        user: user,
-        hasExistingProfile: hasExistingProfile,
-      );
-    } catch (e) {
-      throw StateError(
-          'Unable to verify your profile right now. Please try again.');
+      debugPrint('AUTH FLOW STEP 9: Firestore setup complete');
+    } catch (e, st) {
+      // Non-fatal: Firestore setup failed after successful Firebase Auth.
+      // Bootstrap will create/fix the user doc when rebootstrap() triggers
+      // _resolveStartup(). Do NOT rethrow — caller must reach rebootstrap().
+      debugPrint('AUTH FLOW STEP 9: Firestore setup error (non-fatal): $e');
+      debugPrintStack(stackTrace: st);
     }
+
+    return GoogleSignInFlowResult(
+      user: user,
+      hasExistingProfile: hasExistingProfile,
+    );
   }
 
   Future<void> setPasswordForCurrentUser(String password) async {

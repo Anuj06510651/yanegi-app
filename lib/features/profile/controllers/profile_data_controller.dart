@@ -70,6 +70,36 @@ extension _ProfileDataController on _SocialProfileScreenState {
     } else {
       _vibes = const <String>[];
     }
+
+    // Additional (gallery) photos — written by _ProfileGalleryController. Read
+    // back here so they survive reloads and are visible on other users'
+    // profiles. Absent field => empty (legacy accounts render cleanly).
+    final galleryRaw = data['galleryPhotos'];
+    if (galleryRaw is List) {
+      _galleryPhotos = galleryRaw
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty && isRemoteMediaUrl(e))
+          .toList(growable: false);
+    } else {
+      _galleryPhotos = const <String>[];
+    }
+    debugPrint('GALLERY PHOTOS COUNT: ${_galleryPhotos.length} (rawType:${galleryRaw?.runtimeType}) profile=$_profileUid own=$_isOwnProfile');
+
+    final promptsRaw = data['prompts'];
+    if (promptsRaw is List) {
+      _prompts = promptsRaw
+          .whereType<Map>()
+          .map((m) => <String, String>{
+                'question': (m['question'] ?? '').toString(),
+                'answer': (m['answer'] ?? '').toString(),
+              })
+          .where((p) =>
+              (p['question'] ?? '').isNotEmpty && (p['answer'] ?? '').isNotEmpty)
+          .toList(growable: false);
+    } else {
+      _prompts = const <Map<String, String>>[];
+    }
+    debugPrint('PROMPT VALUE FOUND: ${_prompts.length} (rawType:${promptsRaw?.runtimeType}) profile=$_profileUid own=$_isOwnProfile');
   }
 
   DateTime? _parseMemberSince(Map<String, dynamic> data) {

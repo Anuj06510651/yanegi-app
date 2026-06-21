@@ -36,6 +36,11 @@ extension _FriendActionController on _SocialProfileScreenState {
       return;
     }
 
+    if (!await ActionGate.ensureCanAct(context,
+        message: 'Complete your profile to connect with people.')) {
+      return;
+    }
+
     setState(() {
       _isActionBusy = true;
       _optimisticFriendState = FriendRelationshipState.requestSent;
@@ -57,6 +62,10 @@ extension _FriendActionController on _SocialProfileScreenState {
 
   Future<void> _acceptReceivedRequest() async {
     if (_isActionBusy) return;
+    if (!await ActionGate.ensureCanAct(context,
+        message: 'Complete your profile to connect with people.')) {
+      return;
+    }
     setState(() {
       _isActionBusy = true;
       _optimisticFriendState = FriendRelationshipState.friend;
@@ -158,6 +167,10 @@ extension _FriendActionController on _SocialProfileScreenState {
     if (_isActionBusy ||
         _currentUid.trim().isEmpty ||
         _profileUid.trim().isEmpty) {
+      return;
+    }
+    if (!await ActionGate.ensureCanAct(context,
+        message: 'Complete your profile to send messages.')) {
       return;
     }
 

@@ -172,6 +172,23 @@ class MediaStorageService {
     return _deleteAtPath('banner_images/$userId/banner.jpg');
   }
 
+  /// Best-effort deletion of a stored object addressed by its download URL.
+  /// Used to clean up replaced/removed gallery photos so they do not orphan in
+  /// Storage. The URL carries its own bucket + path (and a cache-buster query,
+  /// which `refFromURL` ignores). Failures are swallowed by design.
+  Future<void> deleteByDownloadUrl(String downloadUrl) async {
+    final url = downloadUrl.trim();
+    if (url.isEmpty) return;
+    try {
+      await FirebaseStorage.instance.refFromURL(url).delete();
+    } on FirebaseException catch (e) {
+      if (e.code.toLowerCase().contains('object-not-found')) return;
+      // best effort: ignore other failures
+    } catch (_) {
+      // best effort
+    }
+  }
+
   Future<void> _deleteAtPath(String storagePath) async {
     final normalizedPath =
         storagePath.startsWith('/') ? storagePath.substring(1) : storagePath;

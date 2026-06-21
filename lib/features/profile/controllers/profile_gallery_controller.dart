@@ -10,19 +10,20 @@ part of '../../../screens/profile_social_screen.dart';
 /// visitors see only the populated cards with no editing affordances.
 extension _ProfileGalleryController on _SocialProfileScreenState {
   // Curated Hinge-style prompt questions offered when adding a prompt.
+  // Event- and community-focused prompts. Yanegi is an events platform, not a
+  // dating app, so prompts center on shared interests, learning and meeting
+  // people through events — never romance or relationships.
   static const List<String> _promptQuestions = <String>[
-    'A perfect day looks like…',
-    'The way to win me over is…',
-    'My most spontaneous moment was…',
-    'I geek out on…',
-    'My simple pleasures…',
-    'I’ll fall for you if…',
-    'Best travel story…',
-    'Two truths and a lie…',
-    'My go-to karaoke song…',
-    'The hallmark of a good event is…',
+    'The type of event I enjoy most…',
+    'The topic I can talk about for hours…',
+    'Currently learning…',
+    'Looking to meet people who…',
+    'One thing I want to experience this year…',
     'You should join my events because…',
-    'My ideal hangout…',
+    'My ideal weekend looks like…',
+    'A skill or hobby I want to share…',
+    'The best event I’ve ever attended…',
+    'A community or scene I’m part of…',
   ];
 
   // ─── PUBLIC: the interleaved feed ─────────────────────────────
@@ -32,8 +33,10 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
 
     // For the owner we always surface "add" slots so the profile feels alive
     // even when empty. Visitors only see populated cards.
+    // Cap at 3 additional photos: show an add slot only while under 3. Any
+    // legacy account already over 3 still shows all of them (never hides data).
     final int photoSlots =
-        _isOwnProfile ? (photos.length < 3 ? 3 : photos.length + 1) : photos.length;
+        _isOwnProfile ? (photos.length < 3 ? 3 : photos.length) : photos.length;
     final int promptSlots =
         _isOwnProfile ? (prompts.length < 2 ? 2 : prompts.length + 1) : prompts.length;
 
@@ -84,41 +87,58 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
             _addGalleryPhoto();
           }
         },
-        child: Container(
-          decoration: BoxDecoration(
-            color: _surfaceColor,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _textSecondaryColor.withAlpha(38)),
-            image: hasImage
-                ? DecorationImage(
-                    image: CachedNetworkImageProvider(url),
-                    fit: BoxFit.cover,
-                  )
-                : null,
-          ),
-          child: hasImage
-              ? Stack(
-                  children: [
-                    if (_isOwnProfile)
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: _circleIconButton(
-                          icon: Icons.more_horiz_rounded,
-                          onTap: () => _onGalleryPhotoTap(index, url),
-                        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            decoration: BoxDecoration(
+              color: _surfaceColor,
+              border: Border.all(color: _textSecondaryColor.withAlpha(38)),
+            ),
+            child: hasImage
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CachedNetworkImage(
+                        imageUrl: url,
+                        fit: BoxFit.cover,
+                        memCacheWidth: 720,
+                        memCacheHeight: 900,
+                        placeholder: (_, __) => Container(color: _surfaceColor),
+                        errorWidget: (_, __, ___) {
+                          debugPrint('GALLERY IMAGE LOAD ERROR: url=$url profile=$_profileUid');
+                          return Container(
+                            color: _surfaceColor,
+                            child: Center(
+                              child: Icon(
+                                Icons.broken_image_outlined,
+                                color: _textSecondaryColor.withAlpha(120),
+                                size: 36,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                  ],
-                )
-              : _buildEmptyPhotoPlaceholder(),
+                      if (_isOwnProfile)
+                        Positioned(
+                          top: 10,
+                          right: 10,
+                          child: _circleIconButton(
+                            icon: Icons.more_horiz_rounded,
+                            onTap: () => _onGalleryPhotoTap(index, url),
+                          ),
+                        ),
+                    ],
+                  )
+                : _buildEmptyPhotoPlaceholder(index),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildEmptyPhotoPlaceholder() {
+  Widget _buildEmptyPhotoPlaceholder(int slot) {
     if (!_isOwnProfile) return const SizedBox.shrink();
-    final uploading = _isUploadingGalleryPhoto;
+    final uploading = _uploadingGallerySlots.contains(slot);
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -248,9 +268,16 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
 
   // ─── PHOTO ACTIONS ────────────────────────────────────────────
   Future<void> _addGalleryPhoto() async {
-    if (!_isOwnProfile || _isUploadingGalleryPhoto || _currentUid.isEmpty) {
+    if (!_isOwnProfile || _currentUid.isEmpty) return;
+    if (_galleryPhotos.length >= 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You can add up to 3 photos.')),
+      );
       return;
     }
+
+    final slot = _galleryPhotos.length;
+    if (_uploadingGallerySlots.contains(slot)) return;
 
     String? croppedPath;
     try {
@@ -282,7 +309,7 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
     }
 
     if (!mounted) return;
-    setState(() => _isUploadingGalleryPhoto = true);
+    setState(() => _uploadingGallerySlots.add(slot));
 
     try {
       // A stable-ish unique slot id. We avoid Random/DateTime.now in shared
@@ -312,7 +339,7 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
         where: 'profile_gallery._addGalleryPhoto',
       );
     } finally {
-      if (mounted) setState(() => _isUploadingGalleryPhoto = false);
+      if (mounted) setState(() => _uploadingGallerySlots.remove(slot));
     }
   }
 
@@ -368,7 +395,8 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
 
   Future<void> _replaceGalleryPhoto(int index) async {
     if (index < 0 || index >= _galleryPhotos.length) return;
-    if (_isUploadingGalleryPhoto || _currentUid.isEmpty) return;
+    if (_currentUid.isEmpty || _uploadingGallerySlots.contains(index)) return;
+    final oldUrl = _galleryPhotos[index];
 
     String? croppedPath;
     try {
@@ -397,7 +425,7 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
     }
 
     if (!mounted) return;
-    setState(() => _isUploadingGalleryPhoto = true);
+    setState(() => _uploadingGallerySlots.add(index));
     try {
       final slotId = '${index}_${croppedPath.hashCode}';
       final url = await _mediaStorageService.uploadImageReliable(
@@ -408,6 +436,10 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
       final next = <String>[..._galleryPhotos];
       next[index] = url;
       await _persistGalleryPhotos(next);
+      // Best-effort: remove the photo we just replaced from Storage.
+      if (oldUrl != url) {
+        unawaited(_mediaStorageService.deleteByDownloadUrl(oldUrl));
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Photo updated.')),
@@ -422,14 +454,17 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
         where: 'profile_gallery._replaceGalleryPhoto',
       );
     } finally {
-      if (mounted) setState(() => _isUploadingGalleryPhoto = false);
+      if (mounted) setState(() => _uploadingGallerySlots.remove(index));
     }
   }
 
   Future<void> _removeGalleryPhoto(int index) async {
     if (index < 0 || index >= _galleryPhotos.length) return;
+    final removedUrl = _galleryPhotos[index];
     final next = <String>[..._galleryPhotos]..removeAt(index);
     await _persistGalleryPhotos(next);
+    // Best-effort: delete the underlying Storage object so it doesn't orphan.
+    unawaited(_mediaStorageService.deleteByDownloadUrl(removedUrl));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Photo removed.')),
@@ -440,11 +475,27 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
     // Optimistic local update so the UI reflects the change immediately even
     // before the profile stream round-trips.
     if (mounted) setState(() => _galleryPhotos = List<String>.unmodifiable(photos));
-    await FirebaseFirestore.instance.collection('users').doc(_currentUid).set({
-      'galleryPhotos': photos,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'updated_at': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(_currentUid).set({
+        'galleryPhotos': photos,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('GALLERY PERSIST SUCCESS: ${photos.length} photos uid=$_currentUid');
+    } catch (e, st) {
+      debugPrint('GALLERY PERSIST ERROR: $e uid=$_currentUid');
+      debugPrint('GALLERY PERSIST STACKTRACE: $st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save photo. Please try again.')),
+        );
+        // Roll back the optimistic update so the UI is consistent with Firestore.
+        setState(() => _galleryPhotos = List<String>.unmodifiable(
+              photos.isEmpty ? const [] : _galleryPhotos,
+            ));
+      }
+      rethrow;
+    }
   }
 
   // ─── PROMPT ACTIONS ───────────────────────────────────────────
@@ -665,10 +716,22 @@ extension _ProfileGalleryController on _SocialProfileScreenState {
     if (mounted) {
       setState(() => _prompts = List<Map<String, String>>.unmodifiable(prompts));
     }
-    await FirebaseFirestore.instance.collection('users').doc(_currentUid).set({
-      'prompts': prompts,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'updated_at': FieldValue.serverTimestamp(),
-    }, SetOptions(merge: true));
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(_currentUid).set({
+        'prompts': prompts,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      debugPrint('PROMPT PERSIST SUCCESS: ${prompts.length} prompts uid=$_currentUid');
+    } catch (e, st) {
+      debugPrint('PROMPT PERSIST ERROR: $e uid=$_currentUid');
+      debugPrint('PROMPT PERSIST STACKTRACE: $st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save prompt. Please try again.')),
+        );
+      }
+      rethrow;
+    }
   }
 }
