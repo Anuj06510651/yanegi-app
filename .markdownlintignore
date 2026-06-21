@@ -1,0 +1,6 @@
+**/node_modules/**
+**/build/**
+**/.dart_tool/**
+**/ios/Pods/**
+**/android/**/build/**
+**/functions/lib/**

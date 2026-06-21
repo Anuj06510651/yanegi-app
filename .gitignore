@@ -1,0 +1,99 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+# Secrets — never commit
+functions/.env
+functions/.runtimeconfig.json
+
+# Cloud Functions dependencies — restored with: cd functions && npm install
+functions/node_modules/
+
+# Flutter build outputs
+/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.dart_tool/
+
+# iOS build
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# macOS
+macos/Flutter/GeneratedPluginRegistrant.swift
+macos/Flutter/Flutter-Debug.xcconfig
+macos/Flutter/Flutter-Release.xcconfig
+
+# Android build outputs
+/android/app/debug
+/android/app/profile
+/android/app/release
+android/.gradle/
+
+# Added by code-review-graph
+.code-review-graph/
+
+# Claude Code / IDE
+.claude/
+.mcp.json
+CLAUDE.md.backup
+.vscode/
+
+# Firebase CLI cache
+.firebase/
+
+# Android signing — NEVER commit keystores or their passwords
+android/key.properties
+*.jks
+*.keystore
+**/upload-keystore.jks
+# Service accounts / admin credentials
+**/serviceAccount*.json
+**/*-service-account*.json
+*.p12
+
+# Catch every Gradle/Flutter build dir at any depth (root, android/, android/app/)
+**/build/

@@ -1,0 +1,43 @@
+{
+  "functions": { "source": "functions" },
+  "firestore": {
+    "indexes": "firestore.indexes.json",
+    "rules": "firestore.rules"
+  },
+  "storage": { "rules": "storage.rules" },
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "/firebase-messaging-sw.js",
+        "headers": [{ "key": "Content-Type", "value": "application/javascript" }]
+      }
+    ],
+    "rewrites": [
+      { "source": "/firebase-messaging-sw.js", "destination": "/firebase-messaging-sw.js" },
+      { "source": "/event/**",   "function": "eventPreview" },
+      { "source": "/profile/**", "destination": "/link.html" },
+      { "source": "**",          "destination": "/index.html" }
+    ]
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "yanegi-684f9",
+          "appId": "1:266662976182:android:40c577760ce4370af8e417",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "yanegi-684f9",
+          "configurations": {
+            "android": "1:266662976182:android:40c577760ce4370af8e417"
+          }
+        }
+      }
+    }
+  }
+}

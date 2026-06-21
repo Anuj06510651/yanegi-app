@@ -1,0 +1,1173 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function eventPath(eventId) {
+      return /databases/$(database)/documents/events/$(eventId);
+    }
+
+    function eventExistsAfter(eventId) {
+      return existsAfter(eventPath(eventId));
+    }
+
+    function eventExists(eventId) {
+      return exists(eventPath(eventId));
+    }
+
+    function eventData(eventId) {
+      return get(eventPath(eventId)).data;
+    }
+
+    function eventDataAfter(eventId) {
+      return getAfter(eventPath(eventId)).data;
+    }
+
+    function friendRequestId(fromUserId, toUserId) {
+      return fromUserId + '_' + toUserId;
+    }
+
+    function friendRequestPath(fromUserId, toUserId) {
+      return /databases/$(database)/documents/friend_requests/$(friendRequestId(fromUserId, toUserId));
+    }
+
+    function friendEdgePath(userId, friendId) {
+      return /databases/$(database)/documents/friends/$(userId)/list/$(friendId);
+    }
+
+    function blockEdgePath(userId, blockedUid) {
+      return /databases/$(database)/documents/blocked_users/$(userId)/list/$(blockedUid);
+    }
+
+    function isBlockedEitherWay(userA, userB) {
+      return exists(blockEdgePath(userA, userB)) || exists(blockEdgePath(userB, userA));
+    }
+
+    function acceptedFriendRequestAfter(fromUserId, toUserId) {
+      return existsAfter(friendRequestPath(fromUserId, toUserId))
+          && getAfter(friendRequestPath(fromUserId, toUserId)).data.status == 'accepted';
+    }
+
+    function eventMaxCapacity(eventId) {
+      return (eventData(eventId).maxCapacity is int)
+          ? eventData(eventId).maxCapacity
+          : ((eventData(eventId).max_capacity is int)
+              ? eventData(eventId).max_capacity
+              : 1000);
+    }
+
+    function eventParticipantsCount(eventId) {
+      return (eventData(eventId).participantsCount is int)
+          ? eventData(eventId).participantsCount
+          : ((eventData(eventId).participants_count is int)
+              ? eventData(eventId).participants_count
+              : ((eventData(eventId).participants is list)
+                  ? eventData(eventId).participants.size()
+                  : 0));
+    }
+
+    function isEventHost(eventId) {
+      return isSignedIn() && eventExists(eventId)
+          && eventData(eventId).hostId == request.auth.uid;
+    }
+
+    function eventIsJoinable(eventId) {
+      return eventExists(eventId)
+          && eventData(eventId).status == 'active'
+          && (!('endAt' in eventData(eventId)) || request.time < eventData(eventId).endAt)
+      && eventParticipantsCount(eventId) < eventMaxCapacity(eventId);
+    }
+
+    function chatPath(chatId) {
+      return /databases/$(database)/documents/chats/$(chatId);
+    }
+
+    function chatExists(chatId) {
+      return exists(chatPath(chatId));
+    }
+
+    function chatData(chatId) {
+      return get(chatPath(chatId)).data;
+    }
+
+    function isChatParticipantFromData(chat) {
+      return isSignedIn()
+          && ('participantIds' in chat)
+          && chat.participantIds is list
+          && request.auth.uid in chat.participantIds;
+    }
+
+    function isChatParticipant(chatId) {
+      return chatExists(chatId) && isChatParticipantFromData(chatData(chatId));
+    }
+
+    function chatEventAllowsMessaging(chatId) {
+      return chatExists(chatId)
+          && (
+            !('eventId' in chatData(chatId))
+            || !(chatData(chatId).eventId is string)
+            || chatData(chatId).eventId.size() == 0
+            || (
+              eventExists(chatData(chatId).eventId)
+              && eventData(chatData(chatId).eventId).status == 'active'
+              && (
+                !('endAt' in eventData(chatData(chatId).eventId))
+                || request.time < eventData(chatData(chatId).eventId).endAt
+              )
+            )
+          );
+    }
+
+    function isActiveEventParticipant(eventId, userId) {
+      return exists(/databases/$(database)/documents/event_participants/$(eventId)/users/$(userId))
+      && get(/databases/$(database)/documents/event_participants/$(eventId)/users/$(userId)).data.status in ['active', 'joined'];
+    }
+
+    match /events/{eventId} {
+      allow create: if isSignedIn()
+          && request.resource.data.eventId == eventId
+          && request.resource.data.hostId == request.auth.uid
+          && request.resource.data.title is string
+          && request.resource.data.title.size() > 0
+          && request.resource.data.title.size() <= 120
+          && request.resource.data.description is string
+          && request.resource.data.description.size() <= 2000
+          && request.resource.data.activityType is string
+          && request.resource.data.locationName is string
+          && request.resource.data.maxCapacity is int
+          && request.resource.data.maxCapacity >= 2
+          && request.resource.data.maxCapacity <= 1000
+          && request.resource.data.participantsCount is int
+          && request.resource.data.participantsCount == 1
+          && request.resource.data.participants is list
+          && request.resource.data.participants.size() == 1
+          && request.resource.data.participants[0] == request.auth.uid
+          && request.resource.data.status == 'active'
+          && request.resource.data.startAt is timestamp
+          && request.resource.data.endAt is timestamp
+          && request.resource.data.endAt > request.resource.data.startAt
+          && request.resource.data.startAt >= request.time
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.updatedAt is timestamp
+          && request.resource.data.isDeleted == false;
+
+      allow read: if isSignedIn()
+          && (
+            resource.data.visibility == 'public'
+            || request.auth.uid == resource.data.hostId
+            || (
+              resource.data.participants is list
+              && request.auth.uid in resource.data.participants
+            )
+            || isActiveEventParticipant(eventId, request.auth.uid)
+            || exists(/databases/$(database)/documents/event_participants/$(eventId)/users/$(request.auth.uid))
+          );
+
+      allow update: if isSignedIn() && (
+          (
+            request.auth.uid == resource.data.hostId
+            && request.resource.data.hostId == resource.data.hostId
+            && request.resource.data.eventId == resource.data.eventId
+          )
+          ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants', 'participantsCount', 'updatedAt'])
+            && request.auth.uid in request.resource.data.participants
+            && !(request.auth.uid in resource.data.participants)
+            && request.resource.data.participantsCount == eventParticipantsCount(eventId) + 1
+            && request.resource.data.participantsCount <= eventMaxCapacity(eventId)
+            && (!('isApprovalRequired' in resource.data) || resource.data.isApprovalRequired == false)
+            && resource.data.status == 'active'
+            && !isBlockedEitherWay(request.auth.uid, resource.data.hostId)
+            && (!('endAt' in resource.data) || request.time < resource.data.endAt)
+          )
+          ||
+          (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants', 'participantsCount', 'updatedAt'])
+            && !(request.auth.uid in request.resource.data.participants)
+            && request.auth.uid in resource.data.participants
+            && request.resource.data.participantsCount == eventParticipantsCount(eventId) - 1
+            && request.resource.data.participantsCount >= 0
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // Compatibility surface for flat friends documents.
+    // Primary production schema remains /friends/{userId}/list/{friendId}.
+    match /friends/{docId} {
+      allow read: if isSignedIn()
+          && (
+            (resource.data.participants is list && request.auth.uid in resource.data.participants)
+            || (resource.data.userId is string && resource.data.userId == request.auth.uid)
+            || (resource.data.friendId is string && resource.data.friendId == request.auth.uid)
+          );
+
+      allow create, update, delete: if false;
+
+    }
+
+    match /event_participants/{eventId}/users/{userId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+          && userId == request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.eventId == eventId
+          && (
+            (
+              eventIsJoinable(eventId)
+              && (
+                (request.resource.data.status == 'active'
+                  && (!('isApprovalRequired' in eventData(eventId)) || eventData(eventId).isApprovalRequired == false)
+                  && !isBlockedEitherWay(request.auth.uid, eventData(eventId).hostId))
+                ||
+                (request.resource.data.status == 'pending'
+                  && ('isApprovalRequired' in eventData(eventId))
+                  && eventData(eventId).isApprovalRequired == true
+                  && !isBlockedEitherWay(request.auth.uid, eventData(eventId).hostId))
+              )
+            )
+            ||
+            (
+              request.resource.data.status == 'active'
+              && eventExistsAfter(eventId)
+              && eventDataAfter(eventId).hostId == request.auth.uid
+            )
+            ||
+            // Waitlist: user joins the waitlist when the event is full.
+            (
+              request.resource.data.status == 'waitlisted'
+              && eventExists(eventId)
+              && eventData(eventId).status == 'active'
+              && eventParticipantsCount(eventId) >= eventMaxCapacity(eventId)
+              && !isBlockedEitherWay(request.auth.uid, eventData(eventId).hostId)
+            )
+          );
+
+      allow update: if isSignedIn() && (
+          isEventHost(eventId)
+          ||
+          (
+            userId == request.auth.uid
+            && request.resource.data.userId == resource.data.userId
+            && request.resource.data.eventId == resource.data.eventId
+            && request.resource.data.status == 'left'
+          )
+          ||
+          (
+            userId == request.auth.uid
+            && request.resource.data.userId == resource.data.userId
+            && request.resource.data.eventId == resource.data.eventId
+            && resource.data.status in ['left', 'removed', 'rejected', 'cancelled']
+            && request.resource.data.status == 'pending'
+            && eventIsJoinable(eventId)
+            && ('isApprovalRequired' in eventData(eventId))
+            && eventData(eventId).isApprovalRequired == true
+          )
+          ||
+          // Re-join waitlist from left/removed/rejected/cancelled when event is full.
+          (
+            userId == request.auth.uid
+            && request.resource.data.userId == resource.data.userId
+            && request.resource.data.eventId == resource.data.eventId
+            && resource.data.status in ['left', 'removed', 'rejected', 'cancelled']
+            && request.resource.data.status == 'waitlisted'
+            && eventExists(eventId)
+            && eventData(eventId).status == 'active'
+            && eventParticipantsCount(eventId) >= eventMaxCapacity(eventId)
+            && !isBlockedEitherWay(request.auth.uid, eventData(eventId).hostId)
+          )
+          ||
+          // ArrivalStatusService write: an active/joined participant may patch
+          // ONLY `arrivalStatus` + `arrivalStatusAt`. Status field is locked.
+          (
+            userId == request.auth.uid
+            && resource.data.status in ['active', 'joined']
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['arrivalStatus', 'arrivalStatusAt'])
+            && (
+              !('arrivalStatus' in request.resource.data)
+              || request.resource.data.arrivalStatus in
+                  ['', 'on_my_way', 'arrived', 'running_late']
+            )
+          )
+          ||
+          // Post-event recap submission: participant writes rating + timestamp.
+          (
+            userId == request.auth.uid
+            && resource.data.status in ['active', 'joined']
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['recapRating', 'recapSubmittedAt', 'updatedAt'])
+            && request.resource.data.recapRating is int
+            && request.resource.data.recapRating >= 0
+            && request.resource.data.recapRating <= 4
+          )
+        );
+
+      allow delete: if isSignedIn() && isEventHost(eventId);
+    }
+
+    match /event_requests/{requestId} {
+      allow read: if isSignedIn() && (
+          resource == null
+          || resource.data.userId == request.auth.uid
+          || resource.data.hostId == request.auth.uid
+        );
+
+      allow create: if isSignedIn()
+          && requestId == request.resource.data.eventId + '_' + request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.eventId is string
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.updatedAt is timestamp
+          && eventIsJoinable(request.resource.data.eventId)
+          && eventData(request.resource.data.eventId).hostId == request.resource.data.hostId
+          && request.resource.data.hostId != request.auth.uid
+          && !isBlockedEitherWay(request.auth.uid, request.resource.data.hostId)
+          && ('isApprovalRequired' in eventData(request.resource.data.eventId))
+          && eventData(request.resource.data.eventId).isApprovalRequired == true;
+
+      allow update: if isSignedIn() && (
+          (
+            request.auth.uid == resource.data.hostId
+            && resource.data.status == 'pending'
+            && request.resource.data.status in ['accepted', 'rejected', 'cancelled']
+            && request.resource.data.userId == resource.data.userId
+            && request.resource.data.hostId == resource.data.hostId
+            && request.resource.data.eventId == resource.data.eventId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+          ||
+          (
+            request.auth.uid == resource.data.userId
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.userId == resource.data.userId
+            && request.resource.data.hostId == resource.data.hostId
+            && request.resource.data.eventId == resource.data.eventId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+          ||
+          (
+            request.auth.uid == resource.data.userId
+            && resource.data.status in ['rejected', 'cancelled']
+            && request.resource.data.status == 'pending'
+            && request.resource.data.userId == resource.data.userId
+            && request.resource.data.hostId == resource.data.hostId
+            && request.resource.data.eventId == resource.data.eventId
+            && eventIsJoinable(resource.data.eventId)
+            && ('isApprovalRequired' in eventData(resource.data.eventId))
+            && eventData(resource.data.eventId).isApprovalRequired == true
+            && !isBlockedEitherWay(request.auth.uid, resource.data.hostId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+
+      // Owner-only create. Keys allowlisted; uid/userId must match path.
+      allow create: if isSignedIn()
+          && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly([
+            'userId', 'uid', 'email', 'phone',
+            'name', 'username', 'usernameLower',
+            'bio', 'authProvider',
+            'photoUrl', 'avatarUrl', 'avatar_url',
+            'bannerUrl', 'banner_url',
+            'vibes', 'gender', 'dob',
+            'hasCompletedProfile', 'profileVisibility',
+            'fcmToken', 'fcmTokenUpdatedAt',
+            'usernameEditCount', 'lastEditTime',
+            'updatedAt', 'updated_at',
+            'createdAt', 'created_at',
+            'friends',
+            'lastEventCreatedAt'
+          ])
+          && (!('userId' in request.resource.data) || request.resource.data.userId == userId)
+          && (!('uid' in request.resource.data) || request.resource.data.uid == userId)
+          && (!('hasCompletedProfile' in request.resource.data) || request.resource.data.hasCompletedProfile is bool);
+
+      // Owner update: only allowlisted fields may be touched; createdAt/uid are not in the
+      // allowlist, so any attempt to mutate them is rejected. Privilege fields like
+      // `role`, `isVerified`, `isAdmin`, `isDeleted` are therefore implicitly blocked.
+      allow update: if isSignedIn()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'username', 'usernameLower',
+            'bio', 'email', 'phone',
+            'photoUrl', 'avatarUrl', 'avatar_url',
+            'bannerUrl', 'banner_url',
+            'vibes', 'gender', 'dob',
+            'hasCompletedProfile', 'profileVisibility',
+            'fcmToken', 'fcmTokenUpdatedAt',
+            'usernameEditCount', 'lastEditTime',
+            'updatedAt', 'updated_at',
+            'authProvider',
+            'friends',
+            'lastEventCreatedAt'
+          ])
+          && (!('userId' in request.resource.data) || request.resource.data.userId == userId)
+          && (!('uid' in request.resource.data) || request.resource.data.uid == userId);
+
+      // Cross-user write: a user removes themselves from another user's friends array.
+      allow update: if isSignedIn()
+          && request.auth.uid != userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'friends',
+            'updatedAt'
+          ])
+          && request.resource.data.friends is list
+          && (
+            (
+              resource.data.friends is list
+              && request.auth.uid in resource.data.friends
+              && !(request.auth.uid in request.resource.data.friends)
+              && request.resource.data.friends.size() ==
+                  resource.data.friends.size() - 1
+              && resource.data.friends.hasAll(request.resource.data.friends)
+            )
+            ||
+            (
+              !('friends' in resource.data)
+              && request.resource.data.friends.size() == 0
+            )
+          );
+
+      // Cross-user write: a user adds themselves to another user's friends array when
+      // an accepted friend request exists.
+      allow update: if isSignedIn()
+          && request.auth.uid != userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'friends',
+            'updatedAt'
+          ])
+          && request.resource.data.friends is list
+          && request.auth.uid in request.resource.data.friends
+          && (
+            (
+              resource.data.friends is list
+              && !(request.auth.uid in resource.data.friends)
+              && request.resource.data.friends.size() ==
+                  resource.data.friends.size() + 1
+              && request.resource.data.friends.hasAll(resource.data.friends)
+            )
+            ||
+            (
+              !('friends' in resource.data)
+              && request.resource.data.friends.size() == 1
+            )
+          )
+          && (
+            acceptedFriendRequestAfter(userId, request.auth.uid)
+            || acceptedFriendRequestAfter(request.auth.uid, userId)
+          );
+
+      allow delete: if false;
+
+      // Owner-only settings subcollection. Without this rule all reads fall
+      // through to the deny-all catchall, breaking join flows and push prefs.
+      match /settings/{settingsId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /chats/{chatId} {
+      // Split get/list because Firestore's static analysis for collection queries
+      // (list) cannot prove that the arrayContains filter value equals request.auth.uid.
+      // Individual document reads (get) use resource.data for strict participant check.
+      // Collection queries (list) rely on the app always filtering by arrayContains: currentUser.uid.
+      // resource == null when the doc doesn't exist — allow signed-in reads so
+      // createOrGetDM's txn.get() on a brand-new (non-existent) DM chat doc
+      // doesn't hit PERMISSION_DENIED and silently return '' to the caller.
+      allow get: if resource == null ? isSignedIn() : isChatParticipantFromData(resource.data);
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn()
+          && request.resource.data.chatId == chatId
+          && request.resource.data.type in ['dm', 'group', 'event']
+          && request.resource.data.participantIds is list
+          && request.resource.data.participantIds.size() > 0
+          && request.auth.uid in request.resource.data.participantIds
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.isActive is bool
+          && request.resource.data.lastMessage is string
+          && request.resource.data.lastMessageAt is timestamp
+          && request.resource.data.createdAt is timestamp
+          && (
+            (
+              request.resource.data.type == 'dm'
+              && request.resource.data.participantIds.size() == 2
+              && !isBlockedEitherWay(
+                request.resource.data.participantIds[0],
+                request.resource.data.participantIds[1]
+              )
+            )
+            ||
+            (
+              request.resource.data.type in ['group', 'event']
+              && request.resource.data.eventId is string
+              && request.resource.data.eventId.size() > 0
+              && (
+                (eventExists(request.resource.data.eventId)
+                  && eventData(request.resource.data.eventId).hostId == request.auth.uid)
+                || (eventExistsAfter(request.resource.data.eventId)
+                  && eventDataAfter(request.resource.data.eventId).hostId == request.auth.uid)
+              )
+            )
+          );
+
+      allow update: if isSignedIn()
+          && chatExists(chatId)
+          && (
+            isChatParticipantFromData(resource.data)
+            || request.auth.uid == resource.data.createdBy
+          )
+          && request.resource.data.chatId == resource.data.chatId
+          && request.resource.data.type == resource.data.type
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.participantIds is list
+          && request.resource.data.participantIds.size() > 0
+          && (
+            request.auth.uid in request.resource.data.participantIds
+            || (
+              request.auth.uid in resource.data.participantIds
+              && !(request.auth.uid in request.resource.data.participantIds)
+              && request.resource.data.participantIds.size() == resource.data.participantIds.size() - 1
+              && resource.data.participantIds.hasAll(request.resource.data.participantIds)
+            )
+            || (
+              !isChatParticipantFromData(resource.data)
+              && request.auth.uid in request.resource.data.participantIds
+              && request.resource.data.participantIds.size() == resource.data.participantIds.size() + 1
+              && request.resource.data.participantIds.hasAll(resource.data.participantIds)
+              && resource.data.type in ['group', 'event']
+              && ('eventId' in resource.data)
+              && resource.data.eventId is string
+              && resource.data.eventId.size() > 0
+              && isActiveEventParticipant(resource.data.eventId, request.auth.uid)
+            )
+          );
+        // Allow a user to add themselves to an event chat when the event allows direct joins.
+    allow update: if isSignedIn()
+      && chatExists(chatId)
+      && resource.data.type in ['group', 'event']
+            && (resource.data.eventId is string)
+            && resource.data.eventId.size() > 0
+            && eventIsJoinable(resource.data.eventId)
+            && (!('isApprovalRequired' in eventData(resource.data.eventId))
+                || eventData(resource.data.eventId).isApprovalRequired == false)
+            && !isBlockedEitherWay(request.auth.uid, eventData(resource.data.eventId).hostId)
+            && request.auth.uid in request.resource.data.participantIds
+            && !(request.auth.uid in resource.data.participantIds)
+            && request.resource.data.participantIds.size() == resource.data.participantIds.size() + 1
+            && request.resource.data.chatId == resource.data.chatId
+            && request.resource.data.type == resource.data.type
+            && request.resource.data.eventId == resource.data.eventId
+            && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.createdAt == resource.data.createdAt
+            && request.resource.data.lastMessage == resource.data.lastMessage
+            && request.resource.data.lastMessageAt == resource.data.lastMessageAt
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participantIds', 'updatedAt', 'isActive']);
+
+      // Pin / unpin a message — any participant in any chat type.
+      // Only the three pin fields may change; all structural fields are locked.
+      allow update: if isSignedIn()
+          && chatExists(chatId)
+          && isChatParticipantFromData(resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['pinnedMessageId', 'pinnedMessageText', 'pinnedAt'])
+          && request.resource.data.chatId       == resource.data.chatId
+          && request.resource.data.type         == resource.data.type
+          && request.resource.data.createdBy    == resource.data.createdBy
+          && request.resource.data.createdAt    == resource.data.createdAt
+          && request.resource.data.participantIds == resource.data.participantIds;
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isChatParticipant(chatId);
+
+        allow create: if isSignedIn()
+            && isChatParticipant(chatId)
+            // Share cards bypass the event-active gate so alumni event
+            // chats remain usable after the event ends.
+            && (
+              chatEventAllowsMessaging(chatId)
+              || request.resource.data.type == 'event_card'
+              || request.resource.data.type == 'profile_card'
+            )
+            && request.resource.data.messageId == messageId
+            && request.resource.data.clientMessageId is string
+            && request.resource.data.clientMessageId.size() > 0
+            && request.resource.data.clientMessageId == request.resource.data.messageId
+            && request.resource.data.chatId == chatId
+            && request.resource.data.senderId == request.auth.uid
+            && request.resource.data.createdAt is timestamp
+            && (
+              chatData(chatId).type != 'dm'
+              || (
+                chatData(chatId).participantIds is list
+                && chatData(chatId).participantIds.size() == 2
+                && !isBlockedEitherWay(
+                  chatData(chatId).participantIds[0],
+                  chatData(chatId).participantIds[1]
+                )
+              )
+            )
+            && (
+              // Standard text message
+              (
+                (!('type' in request.resource.data) || request.resource.data.type == 'text')
+                && request.resource.data.text is string
+                && request.resource.data.text.size() > 0
+                && request.resource.data.text.size() <= 4000
+              )
+              ||
+              // Poll message
+              (
+                request.resource.data.type == 'poll'
+                && request.resource.data.poll is map
+                && request.resource.data.poll.question is string
+                && request.resource.data.poll.question.size() > 0
+                && request.resource.data.poll.question.size() <= 300
+                && request.resource.data.poll.options is list
+                && request.resource.data.poll.options.size() >= 2
+                && request.resource.data.poll.options.size() <= 6
+              )
+              ||
+              // Share card — event or profile shared into chat.
+              // Allowed on both active and ended chats so alumni event
+              // chats remain shareable after the event closes.
+              (
+                (request.resource.data.type == 'event_card'
+                  || request.resource.data.type == 'profile_card')
+                && request.resource.data.metadata is map
+                && request.resource.data.text == ''
+              )
+            );
+
+        // Four allowed update patterns on a message document.
+        // Using direct field checks instead of diff().affectedKeys() because
+        // Firestore's transaction merge semantics can include unchanged fields
+        // in request.resource.data, making hasOnly() unreliable.
+        allow update: if isSignedIn()
+            && isChatParticipant(chatId)
+            && (
+
+              // 1. Reaction toggle — any participant may add/remove their
+              //    emoji reaction. Core immutable fields must stay the same.
+              //    No diff().hasOnly() — unreliable for nested dotted-path
+              //    writes (reactions.<emoji>) inside transactions.
+              (
+                request.resource.data.senderId    == resource.data.senderId
+                && request.resource.data.chatId   == resource.data.chatId
+                && request.resource.data.createdAt == resource.data.createdAt
+                && request.resource.data.text     == resource.data.text
+                && request.resource.data.get('isDeleted', false) == resource.data.get('isDeleted', false)
+              )
+
+              ||
+
+              // 2. Edit own message text — sender only, within 15 minutes.
+              (
+                request.auth.uid == resource.data.senderId
+                && resource.data.isDeleted != true
+                && resource.data.createdAt is timestamp
+                && request.time < resource.data.createdAt + duration.value(15, 'm')
+                && request.resource.data.text is string
+                && request.resource.data.text.size() > 0
+                && request.resource.data.text.size() <= 4000
+                && request.resource.data.isEdited   == true
+                // Immutable fields must not change
+                && request.resource.data.senderId   == resource.data.senderId
+                && request.resource.data.chatId     == resource.data.chatId
+                && request.resource.data.createdAt  == resource.data.createdAt
+                && request.resource.data.messageId  == resource.data.messageId
+                && request.resource.data.get('isDeleted', false) == resource.data.get('isDeleted', false)
+              )
+
+              ||
+
+              // 3. Soft-delete own message — sender only, within 60 minutes.
+              (
+                request.auth.uid == resource.data.senderId
+                && resource.data.isDeleted != true
+                && resource.data.createdAt is timestamp
+                && request.time < resource.data.createdAt + duration.value(60, 'm')
+                && request.resource.data.isDeleted == true
+                // Immutable fields must not change
+                && request.resource.data.senderId  == resource.data.senderId
+                && request.resource.data.chatId    == resource.data.chatId
+                && request.resource.data.createdAt == resource.data.createdAt
+                && request.resource.data.messageId == resource.data.messageId
+                && request.resource.data.text      == resource.data.text
+              )
+
+              ||
+
+              // 4. Poll vote — any participant may update only the poll map.
+              (
+                ('type' in resource.data) && resource.data.type == 'poll'
+                && request.resource.data.senderId   == resource.data.senderId
+                && request.resource.data.chatId     == resource.data.chatId
+                && request.resource.data.createdAt  == resource.data.createdAt
+                && request.resource.data.text       == resource.data.text
+                && request.resource.data.get('isDeleted', false) == resource.data.get('isDeleted', false)
+              )
+
+            );
+
+        allow delete: if false;
+      }
+
+      match /typing/{userId} {
+        allow read: if isChatParticipant(chatId);
+        allow create, update: if isSignedIn()
+            && request.auth.uid == userId
+            && isChatParticipant(chatId)
+            && request.resource.data.keys().hasOnly(['isTyping', 'updatedAt'])
+            && request.resource.data.isTyping is bool
+            && request.resource.data.updatedAt is timestamp;
+        allow delete: if isSignedIn()
+            && request.auth.uid == userId
+            && isChatParticipant(chatId);
+      }
+
+      match /chat_members/{memberId} {
+        allow read: if isSignedIn() && (
+            request.auth.uid == memberId
+            || isChatParticipant(chatId)
+            || request.auth.uid == chatData(chatId).createdBy
+          );
+        allow create, update: if isSignedIn() && request.auth.uid == memberId;
+        allow delete: if isSignedIn() && request.auth.uid == memberId;
+      }
+    }
+
+    match /chat_meta/{chatId}/members/{userId} {
+      allow read: if isSignedIn() && isChatParticipant(chatId);
+      allow create, update: if isSignedIn()
+          && request.auth.uid == userId
+          && isChatParticipant(chatId)
+          && request.resource.data.keys().hasOnly([
+            'lastDeliveredAt',
+            'lastSeenAt',
+            'updatedAt'
+          ])
+          && request.resource.data.lastDeliveredAt is timestamp
+          && (
+            !('lastSeenAt' in request.resource.data)
+            || request.resource.data.lastSeenAt is timestamp
+          )
+          && (
+            !('updatedAt' in request.resource.data)
+            || request.resource.data.updatedAt is timestamp
+          );
+      allow delete: if false;
+    }
+
+    match /friend_requests/{requestId} {
+      // resource == null covers txn.get() on non-existent docs (no crash on first send).
+      // All field-name variants (legacy + canonical) are listed so that Firestore's
+      // static analysis can prove LIST queries like .where('fromUser', ==, uid) or
+      // .where('senderId', ==, uid) satisfy the rule without PERMISSION_DENIED.
+      allow read: if isSignedIn() && (
+          resource == null
+          || resource.data.fromUserId == request.auth.uid
+          || resource.data.toUserId == request.auth.uid
+          || resource.data.fromUser == request.auth.uid
+          || resource.data.toUser == request.auth.uid
+          || resource.data.senderId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid
+        );
+      allow create: if isSignedIn()
+          && requestId == friendRequestId(request.auth.uid, request.resource.data.toUserId)
+          && request.resource.data.keys().hasOnly([
+            'fromUser',
+            'toUser',
+            'fromUserId',
+            'toUserId',
+            'senderId',
+            'receiverId',
+            'status',
+            'createdAt',
+            'updatedAt'
+          ])
+          && request.resource.data.fromUserId == request.auth.uid
+          && request.resource.data.fromUser == request.auth.uid
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.toUserId is string
+          && request.resource.data.toUserId.size() > 0
+          && request.resource.data.toUserId == request.resource.data.toUser
+          && request.resource.data.toUserId == request.resource.data.receiverId
+          && request.resource.data.toUserId != request.auth.uid
+          && !isBlockedEitherWay(request.auth.uid, request.resource.data.toUserId)
+          && request.resource.data.status == 'pending'
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.updatedAt is timestamp
+          && !exists(friendEdgePath(request.auth.uid, request.resource.data.toUserId))
+          && !exists(friendEdgePath(request.resource.data.toUserId, request.auth.uid))
+          && (
+            !exists(friendRequestPath(request.resource.data.toUserId, request.auth.uid))
+            || !(get(friendRequestPath(request.resource.data.toUserId, request.auth.uid)).data.status in ['pending', 'accepted'])
+          );
+      allow update: if isSignedIn() && (
+          (
+            request.auth.uid == resource.data.toUserId
+            && resource.data.status == 'pending'
+            && request.resource.data.status in ['accepted', 'rejected', 'declined']
+            && request.resource.data.fromUserId == resource.data.fromUserId
+            && request.resource.data.toUserId == resource.data.toUserId
+            && request.resource.data.senderId == resource.data.senderId
+            && request.resource.data.receiverId == resource.data.receiverId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+          ||
+          (
+            request.auth.uid == resource.data.fromUserId
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.fromUserId == resource.data.fromUserId
+            && request.resource.data.toUserId == resource.data.toUserId
+            && request.resource.data.senderId == resource.data.senderId
+            && request.resource.data.receiverId == resource.data.receiverId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+      // Four delete paths:
+      // 1. Corrupted-state cleanup: `accepted` request with no friendship edges.
+      // 2. Unblock cleanup: `blocked` status requests removed after unblockUser().
+      // 3. Block cleanup: either party may delete ANY request when they have an
+      //    active block edge on the other party (blockUser Phase 5). The block edge
+      //    is written before Phase 5 runs, so exists() evaluates true here.
+      // 4. Terminal-state cleanup: either party may delete a `declined`, `cancelled`,
+      //    or `rejected` request so a fresh pending request can be created (re-send
+      //    after decline / re-send after cancel). Without this, the existing terminal
+      //    doc would cause a rules-denied update when the sender tries to re-send.
+      allow delete: if isSignedIn()
+          && (
+            request.auth.uid == resource.data.fromUserId
+            || request.auth.uid == resource.data.toUserId
+          )
+          && (
+            (
+              resource.data.status == 'accepted'
+              && !exists(friendEdgePath(resource.data.fromUserId, resource.data.toUserId))
+              && !exists(friendEdgePath(resource.data.toUserId, resource.data.fromUserId))
+            )
+            || resource.data.status in ['blocked', 'declined', 'cancelled', 'rejected']
+            || exists(blockEdgePath(
+                request.auth.uid,
+                request.auth.uid == resource.data.fromUserId
+                  ? resource.data.toUserId
+                  : resource.data.fromUserId
+              ))
+          );
+    }
+
+    match /friends/{userId}/list/{friendId} {
+      // Friends list is public social-graph data: any signed-in user can read
+      // (needed for friend-count stat on profiles and connection-screen friend tabs).
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+          && (request.auth.uid == userId || request.auth.uid == friendId)
+          && userId != friendId
+          && request.resource.data.friendId == friendId
+          && (
+            acceptedFriendRequestAfter(userId, friendId)
+            || acceptedFriendRequestAfter(friendId, userId)
+          );
+      allow delete: if isSignedIn()
+          && (request.auth.uid == userId || request.auth.uid == friendId);
+    }
+
+    match /notifications/{notificationId} {
+      allow create: if isSignedIn()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.userId is string
+          && request.resource.data.userId.size() > 0
+          && request.resource.data.userId != request.auth.uid
+          && request.resource.data.type in [
+            'friend_request',
+            'friend_accept',
+            'event_request',
+            'event_accept',
+            'event_reject',
+            'event_created',
+            'chat_message',
+            'mention',
+            'friend_joined_event',
+            'waitlist_spot_available',
+            'post_event_recap',
+            'shoutout'
+          ]
+          && request.resource.data.createdAt is timestamp
+          && request.resource.data.read == false
+          && request.resource.data.isRead == false
+          && request.resource.data.message is string
+          && request.resource.data.message.size() <= 500
+          && request.resource.data.title is string
+          && request.resource.data.title.size() <= 500
+          && request.resource.data.body is string
+          && request.resource.data.body.size() <= 500
+          && (
+            (
+              request.resource.data.type == 'friend_request'
+              && exists(friendRequestPath(request.auth.uid, request.resource.data.userId))
+              && get(friendRequestPath(request.auth.uid, request.resource.data.userId)).data.status == 'pending'
+            )
+            ||
+            (
+              request.resource.data.type == 'friend_accept'
+              && (
+                acceptedFriendRequestAfter(request.auth.uid, request.resource.data.userId)
+                || acceptedFriendRequestAfter(request.resource.data.userId, request.auth.uid)
+                || (
+                  exists(friendRequestPath(request.resource.data.userId, request.auth.uid))
+                  && get(friendRequestPath(request.resource.data.userId, request.auth.uid)).data.status == 'accepted'
+                )
+              )
+            )
+            ||
+            (
+              request.resource.data.type == 'event_request'
+              && request.resource.data.eventId is string
+              && exists(/databases/$(database)/documents/event_requests/$(request.resource.data.eventId + '_' + request.auth.uid))
+              && get(/databases/$(database)/documents/event_requests/$(request.resource.data.eventId + '_' + request.auth.uid)).data.status == 'pending'
+              && get(/databases/$(database)/documents/event_requests/$(request.resource.data.eventId + '_' + request.auth.uid)).data.hostId == request.resource.data.userId
+            )
+            ||
+            (
+              request.resource.data.type in ['event_accept', 'event_reject']
+              && request.resource.data.eventId is string
+              && exists(/databases/$(database)/documents/event_requests/$(request.resource.data.eventId + '_' + request.resource.data.userId))
+              && get(/databases/$(database)/documents/event_requests/$(request.resource.data.eventId + '_' + request.resource.data.userId)).data.hostId == request.auth.uid
+              && get(/databases/$(database)/documents/event_requests/$(request.resource.data.eventId + '_' + request.resource.data.userId)).data.status in ['accepted', 'rejected']
+            )
+            ||
+            (
+              request.resource.data.type == 'event_created'
+              && request.resource.data.eventId is string
+              && eventExists(request.resource.data.eventId)
+              && eventData(request.resource.data.eventId).hostId == request.auth.uid
+              && (
+                exists(friendEdgePath(request.auth.uid, request.resource.data.userId))
+                || exists(friendEdgePath(request.resource.data.userId, request.auth.uid))
+              )
+            )
+            ||
+            (
+              request.resource.data.type == 'chat_message'
+              && request.resource.data.chatId is string
+              && chatExists(request.resource.data.chatId)
+              && request.auth.uid in chatData(request.resource.data.chatId).participantIds
+              && request.resource.data.userId in chatData(request.resource.data.chatId).participantIds
+            )
+            ||
+            (
+              request.resource.data.type == 'mention'
+              && request.resource.data.chatId is string
+              && chatExists(request.resource.data.chatId)
+              && request.auth.uid in chatData(request.resource.data.chatId).participantIds
+              && request.resource.data.userId in chatData(request.resource.data.chatId).participantIds
+            )
+            ||
+            // Friend-joined-event: sender just joined the event,
+            // recipient is also an active participant of the same event.
+            (
+              request.resource.data.type == 'friend_joined_event'
+              && request.resource.data.eventId is string
+              && eventExists(request.resource.data.eventId)
+              && isActiveEventParticipant(request.resource.data.eventId, request.auth.uid)
+              && isActiveEventParticipant(request.resource.data.eventId, request.resource.data.userId)
+            )
+            ||
+            // Waitlist spot available: sender is an event participant (just left /
+            // was removed), recipient is on the waitlist for the same event.
+            (
+              request.resource.data.type == 'waitlist_spot_available'
+              && request.resource.data.eventId is string
+              && eventExists(request.resource.data.eventId)
+            )
+            ||
+            // Shoutout: any signed-in user can give a shoutout to another user.
+            (
+              request.resource.data.type == 'shoutout'
+              && request.resource.data.eventId is string
+            )
+          );
+      allow read: if isSignedIn() && (
+          resource == null
+          || resource.data.userId == request.auth.uid
+          || resource.data.senderId == request.auth.uid
+        );
+      allow update: if isSignedIn()
+          && (
+            // Recipient marking read/acted-on.
+            (
+              resource.data.userId == request.auth.uid
+              && request.resource.data.userId == resource.data.userId
+              && request.resource.data.senderId == resource.data.senderId
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'read',
+                'isRead',
+                'actionStatus',
+                'type',
+                'updatedAt'
+              ])
+            )
+            ||
+            // Sender refreshing a stale dedupe doc (outside dedupeWindow).
+            // Allows sendNotification to overwrite an expired notification rather
+            // than failing with PERMISSION_DENIED when txn.set hits the update rule.
+            (
+              resource.data.senderId == request.auth.uid
+              && request.resource.data.senderId == resource.data.senderId
+              && request.resource.data.userId == resource.data.userId
+              && request.resource.data.type == resource.data.type
+              && request.resource.data.read == false
+              && request.resource.data.isRead == false
+            )
+          );
+      allow delete: if false;
+    }
+
+    match /push_queue/{queueId} {
+      allow create: if false;
+      allow read, update, delete: if false;
+    }
+
+    // Written by processPushQueue (Admin SDK) — no client access.
+    match /push_notification_failures/{id} {
+      allow read, write: if false;
+    }
+
+    // Compatibility surface for flat messages documents.
+    // Primary production schema remains /chats/{chatId}/messages/{messageId}.
+    match /messages/{messageId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /blocked_users/{userId}/list/{blockedUid} {
+      allow read: if isSignedIn()
+          && (request.auth.uid == userId || request.auth.uid == blockedUid);
+      allow create, delete: if isSignedIn() && request.auth.uid == userId;
+      allow update: if false;
+    }
+
+    // Per-user rate-limit buckets (owner-only). Used by RateLimiterService —
+    // see CLAUDE.md "Rate Limit Spec". Only the owner can read or write their
+    // own buckets; the document `events` array is capped client-side.
+    match /user_quotas/{userId}/buckets/{action} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /notification_failures/{id} {
+      allow create: if isSignedIn()
+          && request.resource.data.senderId is string
+          && request.resource.data.senderId == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+
+    // GPS location data is written here instead of users/{uid} to keep the
+    // user profile rule allowlist clean. Any signed-in user can read (map).
+    match /user_locations/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Heartbeat presence data (isOnline, lastSeen) lives here instead of
+    // users/{uid} so the heartbeat writes never touch the profile allowlist.
+    match /user_presence/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Required for collectionGroup('users') queries (e.g. event_participants subcollections).
+    match /{path=**}/users/{userId} {
+      allow read: if isSignedIn();
+    }
+
+    // Memories written by MemoryService. Owner can write; any signed-in user
+    // can read (shown on profiles). Must come before the deny-all catchall.
+    match /memories/{memoryId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn()
+          && request.auth.uid == request.resource.data.userId;
+      allow update, delete: if isSignedIn()
+          && request.auth.uid == resource.data.userId;
+    }
+
+    // Username uniqueness lookup. Each doc id is the normalized (lowercase)
+    // username and the body stores the owner's uid (legacy: `userId`, new:
+    // `uid` — both shapes are supported because completeProfile writes
+    // `userId` and updateUsername writes both). Without this rule the
+    // onboarding flow's username uniqueness check + reservation both fail
+    // with PERMISSION_DENIED and the user gets stuck on NameUsernameScreen.
+    match /usernames/{normalizedUsername} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+          && (
+            (request.resource.data.get('uid', '') == request.auth.uid)
+            || (request.resource.data.get('userId', '') == request.auth.uid)
+          );
+
+      // Update is allowed only when the doc already belongs to the writer.
+      // The writer must not change ownership to someone else.
+      allow update: if isSignedIn()
+          && (
+            (resource.data.get('uid', '') == request.auth.uid)
+            || (resource.data.get('userId', '') == request.auth.uid)
+          )
+          && (
+            !('uid' in request.resource.data)
+            || request.resource.data.uid == request.auth.uid
+          )
+          && (
+            !('userId' in request.resource.data)
+            || request.resource.data.userId == request.auth.uid
+          );
+
+      // Delete: only the owner. Used by updateUsername when switching to a
+      // new handle (the old doc is freed for reuse).
+      allow delete: if isSignedIn()
+          && (
+            (resource.data.get('uid', '') == request.auth.uid)
+            || (resource.data.get('userId', '') == request.auth.uid)
+          );
+    }
+
+    // Deduplication records written by sendEventReminders Cloud Function
+    // (Admin SDK — bypasses rules). Clients must never read or write these.
+    match /reminder_sent/{docId} {
+      allow read, write: if false;
+    }
+
+    // Deduplication records written by sendPostEventRecaps Cloud Function.
+    match /recap_sent/{docId} {
+      allow read, write: if false;
+    }
+
+    // Deduplication records written by re-engagement Cloud Functions.
+    match /reengagement_sent/{docId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read: if false;
+      allow write: if false;
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "redirects": [
+    {
+      "source": "/event/:path*",
+      "destination": "https://yanegi-684f9.web.app/event/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/profile/:path*",
+      "destination": "https://yanegi-684f9.web.app/profile/:path*",
+      "permanent": false
+    }
+  ]
+}

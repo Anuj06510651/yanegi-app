@@ -1,0 +1,86 @@
+{
+  "project_info": {
+    "project_number": "266662976182",
+    "project_id": "yanegi-684f9",
+    "storage_bucket": "yanegi-684f9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:266662976182:android:40c577760ce4370af8e417",
+        "android_client_info": {
+          "package_name": "com.yanegi.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "266662976182-0at0lih0g03oh68c0vnecj5pdusbiegj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yanegi.app",
+            "certificate_hash": "7f53b2736131e097cde23a58d37f2f25cfc8211b"
+          }
+        },
+        {
+          "client_id": "266662976182-0fn2ajg7bq64lr33vvbqqdt7nhbtoemc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yanegi.app",
+            "certificate_hash": "41e28c3d89a493850be054420942c1e6ebca0297"
+          }
+        },
+        {
+          "client_id": "266662976182-hjg3h0b469ul9ca4a6ipd1it9qi3kcgq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yanegi.app",
+            "certificate_hash": "a44bfcfff1e635a26b8abd2aee1d7d03ca51c558"
+          }
+        },
+        {
+          "client_id": "266662976182-ju2sttuksj8ed9a6pl45q736ie6kcrbh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yanegi.app",
+            "certificate_hash": "70c1d026100b76ff722fbae8cde2666196f449fc"
+          }
+        },
+        {
+          "client_id": "266662976182-krdohc2v6p727vdnca9gbk8lr4634ihv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.yanegi.app",
+            "certificate_hash": "11bbdf66d19b606244b7a9f25ac6229d0716ec0d"
+          }
+        },
+        {
+          "client_id": "266662976182-7n3hts1n38rsg6vjpmla3ngip45h871e.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAFa5071HC5_4zvOuhKb_4aWZrLrrfOrs0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "266662976182-7n3hts1n38rsg6vjpmla3ngip45h871e.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "266662976182-cn7m2v12smnj216lfvpvpavhqv8s1kme.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.yanegi"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

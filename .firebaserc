@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "yanegi-684f9",
+    "prod": "yanegi-684f9",
+    "dev": "yanegi-dev"
+  }
+}
