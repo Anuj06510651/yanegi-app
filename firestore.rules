@@ -1167,6 +1167,41 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+
+    // ── Admin Dashboard ──────────────────────────────────────────────────────
+    // Grants read-only access to admins collection members.
+
+    function isAdmin() {
+      return isSignedIn()
+          && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Admin can read their own admin document (required for auth guard check)
+    match /admins/{uid} {
+      allow read: if request.auth.uid == uid;
+    }
+
+    // Admin read access to all users
+    match /users/{uid} {
+      allow read: if isAdmin();
+    }
+
+    // Admin read access to all events
+    match /events/{eventId} {
+      allow read: if isAdmin();
+    }
+
+    // Admin read access to all reports
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+    }
+
+    // Admin read access to communities
+    match /communities/{communityId} {
+      allow read: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     match /{document=**} {
       allow read: if false;
       allow write: if false;

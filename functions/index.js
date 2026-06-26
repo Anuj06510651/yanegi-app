@@ -751,24 +751,74 @@ exports.processPushQueue = functions.firestore
       'messaging/invalid-registration-token',
     ]);
 
+    // ── Resolve notification image ────────────────────────────────────────────
+    // Image URL strategy follows the notification avatar matrix in CLAUDE.md:
+    //   • Event-acting types (accept/reject/created/waitlist/recap) → event bannerUrl
+    //   • Group chat message → event bannerUrl (chatId starts with grp_)
+    //   • Person-acting types (friend_request/accept, mention, shoutout, DM) → sender avatarUrl
+    //   • event_request → requester avatarUrl (NOT the event banner)
+    // Falls back to empty string (no image) on fetch failure — never blocks delivery.
+    const EVENT_IMAGE_TYPES = new Set([
+      'event_accept', 'event_reject', 'event_created',
+      'waitlist_spot_available', 'post_event_recap',
+    ]);
+    const PERSON_IMAGE_TYPES = new Set([
+      'friend_request', 'friend_accept', 'event_request',
+      'mention', 'friend_joined_event', 'shoutout',
+    ]);
+
+    let imageUrl = '';
+    try {
+      if (EVENT_IMAGE_TYPES.has(type) && eventId) {
+        // Event acting — show event cover
+        const evSnap = await db.collection('events').doc(eventId).get();
+        if (evSnap.exists) imageUrl = evSnap.data().bannerUrl || '';
+      } else if (type === 'chat_message' && chatId && chatId.startsWith('grp_')) {
+        // Group chat — show event cover
+        const evId = chatId.replace('grp_', '');
+        const evSnap = await db.collection('events').doc(evId).get();
+        if (evSnap.exists) imageUrl = evSnap.data().bannerUrl || '';
+      } else if ((PERSON_IMAGE_TYPES.has(type) || type === 'chat_message') && senderId) {
+        // Person acting — show sender avatar
+        const sSnap = await db.collection('users').doc(senderId).get();
+        if (sSnap.exists) imageUrl = sSnap.data().avatarUrl || '';
+      }
+    } catch (imgErr) {
+      console.warn('[push_queue] image fetch failed (non-fatal)', { type, eventId, senderId, error: imgErr.message });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     try {
       await messaging.send({
         token: fcmToken,
         notification: {
           title: title || 'New Activity',
           body:  body  || '',
+          // imageUrl: shows the event banner or sender avatar in the notification.
+          // Android renders it automatically as a large image.
+          // iOS requires a UNNotificationServiceExtension (see ios/NotificationService/).
+          ...(imageUrl ? { imageUrl } : {}),
         },
-        data: fcmData,
+        data: {
+          ...fcmData,
+          // Pass image URL in data payload so Flutter/NSE can also access it.
+          ...(imageUrl ? { imageUrl } : {}),
+        },
         android: {
           priority: 'high',
           notification: {
             channelId: 'yanegi_activity',
             priority:  'high',
             sound:     'default',
+            // Android also supports imageUrl directly here for large image style.
+            ...(imageUrl ? { imageUrl } : {}),
           },
         },
         apns: {
           payload: { aps: { sound: 'default', badge: 1 } },
+          // iOS: FCM tunnels the image via mutable-content + fcm_options.
+          // The Notification Service Extension downloads it before display.
+          ...(imageUrl ? { fcmOptions: { image: imageUrl } } : {}),
         },
       });
 
